@@ -13,8 +13,6 @@ services:
         value: production
       - key: PORT
         value: "3001"
-      - key: OPENROUTER_API_KEY
-        sync: false
       - key: CLIENT_URL
         value: https://accuracy-sketch-ai.onrender.com
     healthCheckPath: /api/health
