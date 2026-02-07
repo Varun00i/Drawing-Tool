@@ -1,0 +1,23 @@
+{
+  "name": "accuracy-sketch-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Accuracy Sketch AI — Practice solo or compete live: sketch, submit, score.",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev",
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "cd server && npm run build",
+    "build:client": "cd client && npm run build",
+    "start": "cd server && npm start",
+    "lint": "cd client && npm run lint",
+    "test": "cd server && npm test",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

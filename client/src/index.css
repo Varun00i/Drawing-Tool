@@ -1,0 +1,161 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Apple-inspired base styles ── */
+:root {
+  --color-bg: #FAFAFA;
+  --color-card: #FFFFFF;
+  --color-border: #E5E5EA;
+  --color-text: #1D1D1F;
+  --color-text-secondary: #86868B;
+  --color-blue: #007AFF;
+  --color-green: #34C759;
+  --color-red: #FF3B30;
+  --color-orange: #FF9500;
+  --transition-default: 0.2s ease;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.47059;
+  letter-spacing: -0.022em;
+  overflow-x: hidden;
+}
+
+/* ── High-contrast mode ── */
+.high-contrast {
+  --color-bg: #000000;
+  --color-card: #1A1A1A;
+  --color-border: #555555;
+  --color-text: #FFFFFF;
+  --color-text-secondary: #CCCCCC;
+}
+
+.high-contrast body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+}
+
+/* ── Reduce motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.reduce-motion *, .reduce-motion *::before, .reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* ── Button styles ── */
+@layer components {
+  .btn-primary {
+    @apply px-6 py-3 bg-[#007AFF] text-white rounded-apple font-medium text-base
+           transition-all duration-200 hover:bg-[#0056CC] active:scale-[0.98]
+           focus:outline-none focus:ring-2 focus:ring-[#007AFF] focus:ring-offset-2
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply px-6 py-3 bg-[#F2F2F7] text-[#1D1D1F] rounded-apple font-medium text-base
+           transition-all duration-200 hover:bg-[#E5E5EA] active:scale-[0.98]
+           focus:outline-none focus:ring-2 focus:ring-[#007AFF] focus:ring-offset-2;
+  }
+
+  .btn-ghost {
+    @apply px-4 py-2 text-[#007AFF] rounded-apple font-medium text-base
+           transition-all duration-200 hover:bg-[#007AFF]/10 active:scale-[0.98]
+           focus:outline-none focus:ring-2 focus:ring-[#007AFF] focus:ring-offset-2;
+  }
+
+  .card {
+    @apply bg-white rounded-apple-lg border border-[#E5E5EA] shadow-apple p-6;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-3 bg-[#F2F2F7] border border-transparent rounded-apple
+           text-base text-[#1D1D1F] placeholder-[#86868B]
+           focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]
+           transition-all duration-200;
+  }
+
+  .tool-btn {
+    @apply flex flex-col items-center justify-center p-2.5 rounded-xl
+           transition-all duration-200 hover:bg-[#F2F2F7] active:scale-95
+           focus:outline-none focus:ring-2 focus:ring-[#007AFF]
+           min-w-[56px] min-h-[56px];
+  }
+
+  .tool-btn.active {
+    @apply bg-[#007AFF] text-white hover:bg-[#0056CC];
+  }
+}
+
+/* ── Canvas styles ── */
+.drawing-canvas {
+  touch-action: none;
+  border-radius: 12px;
+  /* Cursor is set dynamically by useCanvas hook */
+}
+
+/* ── Grid overlay ── */
+.grid-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.grid-overlay line {
+  stroke: rgba(0, 122, 255, 0.25);
+  stroke-width: 1;
+}
+
+/* ── Scrollbar styling ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #C7C7CC; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #A1A1A6; }
+
+/* ── Tooltip ── */
+.tooltip {
+  @apply absolute z-50 px-3 py-1.5 bg-[#1D1D1F] text-white text-xs rounded-lg
+         pointer-events-none opacity-0 transition-opacity duration-200;
+}
+
+.tooltip.show {
+  @apply opacity-100;
+}
+
+/* ── Floating reference window ── */
+.floating-ref {
+  @apply absolute bg-white rounded-apple-lg shadow-apple-lg border border-[#E5E5EA]
+         overflow-hidden;
+  resize: both;
+  min-width: 200px;
+  min-height: 200px;
+}
+
+.floating-ref-header {
+  @apply flex items-center justify-between px-3 py-2 bg-[#F2F2F7] border-b border-[#E5E5EA]
+         cursor-move select-none text-sm font-medium text-[#86868B];
+}
