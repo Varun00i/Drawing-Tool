@@ -67,9 +67,9 @@ export interface ScoringWeights {
 }
 
 export const DIFFICULTY_WEIGHTS: Record<Difficulty, ScoringWeights> = {
-  easy:   { contour: 0.60, keypoints: 0.25, local: 0.15 },
-  medium: { contour: 0.50, keypoints: 0.30, local: 0.20 },
-  hard:   { contour: 0.40, keypoints: 0.35, local: 0.25 },
+  easy:   { contour: 0.65, keypoints: 0.30, local: 0.05 },
+  medium: { contour: 0.60, keypoints: 0.33, local: 0.07 },
+  hard:   { contour: 0.55, keypoints: 0.35, local: 0.10 },
 };
 
 export interface PromptTemplate {

@@ -47,6 +47,8 @@ export interface MatchResult {
   heatmapUrl?: string;
   comparisonUrl?: string;
   overlayUrl?: string;
+  referenceBase64?: string;
+  sketchBase64?: string;
   thumbnailUrl?: string;
 }
 

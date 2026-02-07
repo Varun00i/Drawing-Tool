@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Minimize2, Move } from 'lucide-react';
+import { X, Move } from 'lucide-react';
 import { GridOverlay } from './GridOverlay';
 
 interface FloatingReferenceProps {
@@ -10,11 +10,24 @@ interface FloatingReferenceProps {
 
 export function FloatingReference({ imageUrl, onClose, gridOption = 'none' }: FloatingReferenceProps) {
   const [position, setPosition] = useState({ x: 40, y: 40 });
-  const [size, setSize] = useState({ width: 300, height: 300 });
   const [isDragging, setIsDragging] = useState(false);
   const [opacity, setOpacity] = useState(0.9);
   const dragOffset = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  // Track actual container size via ResizeObserver for accurate grid overlay
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver(() => {
+      // Force a re-render so the grid overlay recalculates
+      // The grid overlay uses CSS inset:0, so it auto-fits
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     setIsDragging(true);
@@ -51,10 +64,11 @@ export function FloatingReference({ imageUrl, onClose, gridOption = 'none' }: Fl
       style={{
         left: position.x,
         top: position.y,
-        width: size.width,
-        height: size.height + 40,
         opacity,
         zIndex: 50,
+        width: 300,
+        minWidth: 150,
+        minHeight: 150,
       }}
     >
       <div className="floating-ref-header" onMouseDown={onMouseDown}>
@@ -78,12 +92,11 @@ export function FloatingReference({ imageUrl, onClose, gridOption = 'none' }: Fl
           </button>
         </div>
       </div>
-      <div className="relative" style={{ height: size.height }}>
+      <div ref={contentRef} className="relative">
         <img
           src={imageUrl}
           alt="Reference"
-          className="w-full h-full object-contain bg-white"
-          style={{ height: size.height }}
+          className="w-full h-auto object-contain bg-white"
           draggable={false}
         />
         {gridOption !== 'none' && (

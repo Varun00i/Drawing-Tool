@@ -169,10 +169,10 @@ body {
   }
 
   .tool-btn {
-    @apply flex flex-col items-center justify-center p-2.5 rounded-xl
+    @apply flex flex-col items-center justify-center p-2 rounded-xl
            transition-all duration-200 hover:bg-[#F2F2F7] active:scale-95
            focus:outline-none focus:ring-2 focus:ring-[#007AFF]
-           min-w-[56px] min-h-[56px];
+           min-w-[44px] min-h-[44px] text-xs;
   }
 
   .tool-btn.active {
@@ -240,4 +240,78 @@ body {
 .floating-ref-header {
   @apply flex items-center justify-between px-3 py-2 bg-[#F2F2F7] border-b border-[#E5E5EA]
          cursor-move select-none text-sm font-medium text-[#86868B];
+}
+
+/* ── Toolbar responsive styles ── */
+.toolbar-container {
+  @apply flex flex-col gap-1 p-1.5 bg-white rounded-xl border border-[#E5E5EA] shadow-apple;
+  max-width: 100%;
+}
+
+.toolbar-btn {
+  @apply flex flex-col items-center justify-center p-1.5 rounded-lg
+         transition-all duration-150 hover:bg-[#F2F2F7] active:scale-95
+         focus:outline-none min-w-[40px] min-h-[40px];
+}
+
+.toolbar-btn.active {
+  @apply bg-[#007AFF] text-white hover:bg-[#0056CC];
+}
+
+.toolbar-btn-sm {
+  @apply flex items-center justify-center p-1.5 rounded-lg
+         transition-all duration-150 hover:bg-[#F2F2F7] active:scale-95
+         focus:outline-none w-7 h-7;
+}
+
+.toolbar-btn-sm.active {
+  @apply bg-[#007AFF] text-white hover:bg-[#0056CC];
+}
+
+.toolbar-label {
+  font-size: 9px;
+  line-height: 1;
+  margin-top: 2px;
+  font-weight: 500;
+}
+
+/* ── Responsive canvas & layout ── */
+@media (max-width: 768px) {
+  .toolbar-label {
+    display: none;
+  }
+
+  .toolbar-btn {
+    min-width: 36px;
+    min-height: 36px;
+    padding: 4px;
+  }
+
+  .toolbar-btn-sm {
+    width: 28px;
+    height: 28px;
+  }
+
+  .toolbar-container {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .toolbar-container {
+    padding: 4px;
+    gap: 2px;
+  }
+}
+
+/* ── Color picker backdrop on mobile ── */
+@media (max-width: 640px) {
+  .color-picker-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.3);
+    z-index: 99;
+  }
 }

@@ -49,7 +49,7 @@ export function SoloGame() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Setup phase
-  const [phase, setPhase] = useState<'setup' | 'playing' | 'results'>('setup');
+  const [phase, setPhase] = useState<'setup' | 'preview' | 'playing' | 'results'>('setup');
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -61,42 +61,45 @@ export function SoloGame() {
     return () => window.removeEventListener('keydown', handler);
   }, [undo, redo]);
 
-  const startGame = useCallback(async () => {
+  const generateReference = useCallback(async () => {
     setLoading(true);
     try {
       const image = await generateImage(soloDifficulty, undefined, customPrompt || undefined);
       setReferenceImageUrl(image.url);
-
-      // Countdown
-      setPhase('playing');
-      let count = 3;
-      setCountdown(count);
-      const cdInterval = setInterval(() => {
-        count--;
-        setCountdown(count);
-        if (count <= 0) {
-          clearInterval(cdInterval);
-          setGameState('playing');
-          setTimeRemaining(soloTimer);
-          setGridVisible(soloGrid !== 'none');
-
-          // Start timer
-          const endTime = Date.now() + soloTimer * 1000;
-          timerRef.current = setInterval(() => {
-            const remaining = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
-            setTimeRemaining(remaining);
-            if (remaining <= 0) {
-              clearInterval(timerRef.current!);
-              handleSubmit();
-            }
-          }, 200);
-        }
-      }, 1000);
+      setPhase('preview');
     } catch (err) {
-      console.error('Failed to start game:', err);
+      console.error('Failed to generate reference image:', err);
     }
     setLoading(false);
-  }, [soloDifficulty, soloTimer, soloGrid]);
+  }, [soloDifficulty, customPrompt]);
+
+  const startPlaying = useCallback(() => {
+    // Countdown
+    setPhase('playing');
+    let count = 3;
+    setCountdown(count);
+    const cdInterval = setInterval(() => {
+      count--;
+      setCountdown(count);
+      if (count <= 0) {
+        clearInterval(cdInterval);
+        setGameState('playing');
+        setTimeRemaining(soloTimer);
+        setGridVisible(soloGrid !== 'none');
+
+        // Start timer
+        const endTime = Date.now() + soloTimer * 1000;
+        timerRef.current = setInterval(() => {
+          const remaining = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+          setTimeRemaining(remaining);
+          if (remaining <= 0) {
+            clearInterval(timerRef.current!);
+            handleSubmit();
+          }
+        }, 200);
+      }
+    }, 1000);
+  }, [soloTimer, soloGrid]);
 
   const handleSubmit = useCallback(async () => {
     if (submitting) return;
@@ -120,6 +123,8 @@ export function SoloGame() {
         heatmapUrl: result.heatmapUrl,
         comparisonUrl: result.comparisonUrl,
         overlayUrl: result.overlayUrl,
+        referenceBase64: result.referenceBase64,
+        sketchBase64: result.sketchBase64,
       };
       setMyResult(matchResult);
       playSfx('complete');
@@ -252,12 +257,57 @@ export function SoloGame() {
           </div>
 
           <button
-            onClick={startGame}
+            onClick={generateReference}
             disabled={loading}
             className="btn-primary w-full text-lg py-4 flex items-center justify-center gap-2"
           >
             {loading ? <Loader2 size={20} className="animate-spin" /> : null}
-            {loading ? 'Generating Reference...' : 'Start Sketching'}
+            {loading ? 'Generating Reference...' : 'Generate Reference Image'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Preview Phase ──
+  if (phase === 'preview') {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center px-6 animate-fade-in">
+        <button onClick={handleBack} className="absolute top-6 left-6 btn-ghost flex items-center gap-2">
+          <ArrowLeft size={18} /> Back
+        </button>
+
+        <h2 className="text-2xl font-bold mb-4">Reference Image</h2>
+        <p className="text-[#86868B] mb-6 text-center max-w-md">
+          Study this image carefully. You'll need to recreate it from memory once the timer starts.
+        </p>
+
+        <div className="card p-3 mb-6 max-w-md">
+          <img
+            src={referenceImageUrl}
+            alt="Reference"
+            className="w-full rounded-lg object-contain"
+            style={{ maxHeight: '50vh' }}
+          />
+        </div>
+
+        <div className="flex gap-3 w-full max-w-md">
+          <button
+            onClick={() => {
+              setReferenceImageUrl('');
+              generateReference();
+            }}
+            disabled={loading}
+            className="btn-secondary flex-1 flex items-center justify-center gap-2"
+          >
+            {loading ? <Loader2 size={16} className="animate-spin" /> : null}
+            Regenerate
+          </button>
+          <button
+            onClick={startPlaying}
+            className="btn-primary flex-1 flex items-center justify-center gap-2 text-lg"
+          >
+            Start Drawing
           </button>
         </div>
       </div>
@@ -311,18 +361,17 @@ export function SoloGame() {
       </div>
 
       {/* Main Content */}
-      <div className={`flex-1 flex ${settings.referenceViewMode === 'split' ? 'flex-row' : ''} p-4 gap-4`}>
+      <div className={`flex-1 flex ${settings.referenceViewMode === 'split' ? 'flex-col md:flex-row' : ''} p-2 sm:p-4 gap-2 sm:gap-4`}>
         {/* Reference (Split Mode) */}
         {settings.referenceViewMode === 'split' && referenceVisible && referenceImageUrl && countdown <= 0 && (
-          <div className="w-1/2 flex items-center justify-center">
+          <div className="md:w-1/2 flex items-center justify-center">
             <div className="card p-2">
               <p className="text-xs text-[#86868B] text-center mb-2 font-medium">Reference</p>
               <div className="relative">
                 <img
                   src={referenceImageUrl}
                   alt="Reference"
-                  className="max-w-full max-h-[60vh] object-contain rounded-lg"
-                  style={{ width: CANVAS_SIZE, height: CANVAS_SIZE, maxHeight: '60vh' }}
+                  className="w-full max-h-[30vh] md:max-h-[60vh] object-contain rounded-lg"
                 />
                 {gridVisible && (
                   <GridOverlay gridOption={soloGrid} />
@@ -333,14 +382,14 @@ export function SoloGame() {
         )}
 
         {/* Canvas */}
-        <div className={`${settings.referenceViewMode === 'split' && referenceVisible ? 'w-1/2' : 'flex-1'} flex flex-col items-center`}>
-          <div className="relative">
+        <div className={`${settings.referenceViewMode === 'split' && referenceVisible ? 'md:w-1/2' : 'flex-1'} flex flex-col items-center`}>
+          <div className="relative w-full max-w-[512px]">
             <canvas
               ref={canvasRef}
               width={CANVAS_SIZE}
               height={CANVAS_SIZE}
-              className={`drawing-canvas border border-[#E5E5EA] shadow-apple-md bg-white max-w-full`}
-              style={{ maxHeight: '60vh', aspectRatio: '1' }}
+              className="drawing-canvas border border-[#E5E5EA] shadow-apple-md bg-white w-full"
+              style={{ aspectRatio: '1', maxHeight: '60vh' }}
             />
 
             {/* Grid Overlay */}

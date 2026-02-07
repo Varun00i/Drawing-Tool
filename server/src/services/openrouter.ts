@@ -1,5 +1,6 @@
 /**
- * OpenRouter Text-to-Image integration with caching.
+ * Image generation service using Pollinations.ai (free, no API key needed).
+ * Falls back to Jimp placeholder if Pollinations is unreachable.
  * Supports both preset difficulty-based prompts and custom user prompts.
  */
 
@@ -8,14 +9,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { Difficulty, PROMPT_TEMPLATES } from '../types';
 
-const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/images/generations';
 const CACHE_DIR = path.join(__dirname, '..', '..', 'generated-images', 'cache');
-
-// Free/cheap models available on OpenRouter for image generation
-const FREE_MODELS = [
-  'stabilityai/stable-diffusion-xl-base-1.0',
-  'black-forest-labs/flux-1-schnell',
-];
 
 interface GeneratedImage {
   id: string;
@@ -55,7 +49,8 @@ async function saveToCache(cacheKey: string, imageData: Buffer): Promise<string>
 }
 
 /**
- * Generate a reference image. Supports:
+ * Generate a reference image using Pollinations.ai (free, no API key).
+ * Supports:
  * - Preset prompts by difficulty + seed
  * - Custom user prompts
  */
@@ -66,7 +61,7 @@ export async function generateReferenceImage(
 ): Promise<GeneratedImage> {
   // Use custom prompt if provided, otherwise use preset templates
   const prompt = customPrompt
-    ? `${customPrompt}, pencil sketch style, white background, clean line art, 1024x1024`
+    ? `${customPrompt}, pencil sketch style, white background, clean line art`
     : getPrompt(difficulty, seed);
 
   const cacheKey = getCacheKey(prompt);
@@ -75,73 +70,47 @@ export async function generateReferenceImage(
   // Check cache first
   const cachedUrl = getCachedImage(cacheKey);
   if (cachedUrl) {
+    console.log(`[ImageGen] Cache hit for prompt: "${prompt.slice(0, 60)}..."`);
     return { id, url: cachedUrl, prompt, cached: true };
   }
 
-  // Call OpenRouter API
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey || apiKey === 'your_openrouter_api_key_here') {
-    // Demo mode: generate a placeholder image using Jimp
-    return generatePlaceholderImage(difficulty, prompt, cacheKey);
-  }
+  // ── Try Pollinations.ai (free, no API key) ──
+  try {
+    const encodedPrompt = encodeURIComponent(prompt);
+    const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=512&height=512&nologo=true&seed=${Date.now()}`;
 
-  // Try each model in order until one works
-  const models = [
-    process.env.OPENROUTER_MODEL,
-    ...FREE_MODELS,
-  ].filter(Boolean) as string[];
+    console.log(`[ImageGen] Requesting from Pollinations.ai: "${prompt.slice(0, 60)}..."`);
 
-  for (const model of models) {
-    try {
-      const response = await fetch(OPENROUTER_API_URL, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://accuracy-sketch-ai.app',
-          'X-Title': 'Accuracy Sketch AI',
-        },
-        body: JSON.stringify({
-          model,
-          prompt,
-          n: 1,
-          size: '1024x1024',
-        }),
-      });
+    const response = await fetch(pollinationsUrl, {
+      signal: AbortSignal.timeout(30000), // 30s timeout
+    });
 
-      if (!response.ok) {
-        console.warn(`OpenRouter model ${model} returned ${response.status}, trying next...`);
-        continue;
-      }
-
-      const data = await response.json() as any;
-      const imageUrl = data?.data?.[0]?.url;
-
-      if (imageUrl) {
-        const imgResponse = await fetch(imageUrl);
-        const imgBuffer = Buffer.from(await imgResponse.arrayBuffer());
-        const localUrl = await saveToCache(cacheKey, imgBuffer);
+    if (response.ok) {
+      const buffer = Buffer.from(await response.arrayBuffer());
+      // Verify we got an actual image (check for PNG/JPEG header)
+      if (buffer.length > 1000 && (
+        (buffer[0] === 0x89 && buffer[1] === 0x50) || // PNG
+        (buffer[0] === 0xFF && buffer[1] === 0xD8)     // JPEG
+      )) {
+        const localUrl = await saveToCache(cacheKey, buffer);
+        console.log(`[ImageGen] Success from Pollinations.ai, saved to cache`);
         return { id, url: localUrl, prompt, cached: false };
+      } else {
+        console.warn(`[ImageGen] Pollinations returned non-image data (${buffer.length} bytes)`);
       }
-
-      const b64 = data?.data?.[0]?.b64_json;
-      if (b64) {
-        const imgBuffer = Buffer.from(b64, 'base64');
-        const localUrl = await saveToCache(cacheKey, imgBuffer);
-        return { id, url: localUrl, prompt, cached: false };
-      }
-    } catch (error) {
-      console.warn(`OpenRouter model ${model} failed:`, error);
-      continue;
+    } else {
+      console.warn(`[ImageGen] Pollinations returned status ${response.status}`);
     }
+  } catch (error: any) {
+    console.warn(`[ImageGen] Pollinations.ai failed:`, error.message || error);
   }
 
-  // All models failed, use placeholder
-  console.warn('All OpenRouter models failed, using placeholder');
+  // ── Fallback: Jimp placeholder ──
+  console.warn('[ImageGen] All sources failed, using placeholder');
   return generatePlaceholderImage(difficulty, prompt, cacheKey);
 }
 
-// Placeholder image for demo/dev mode
+// Placeholder image for fallback mode
 async function generatePlaceholderImage(
   difficulty: Difficulty,
   prompt: string,
@@ -155,7 +124,6 @@ async function generatePlaceholderImage(
 
   // Draw simple shapes based on difficulty
   if (difficulty === 'easy') {
-    // Draw a circle (apple-like)
     const cx = size / 2, cy = size / 2, r = 120;
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
@@ -165,22 +133,18 @@ async function generatePlaceholderImage(
         }
       }
     }
-    // Small stem
     for (let y = cy - r - 25; y < cy - r; y++) {
       for (let x = cx - 2; x <= cx + 2; x++) {
         if (y >= 0) img.setPixelColor(Jimp.rgbaToInt(40, 40, 40, 255), x, y);
       }
     }
   } else if (difficulty === 'medium') {
-    // Draw a simple tree
     const cx = size / 2;
-    // Trunk
     for (let y = size * 0.55; y < size * 0.85; y++) {
       for (let x = cx - 12; x < cx + 12; x++) {
         img.setPixelColor(Jimp.rgbaToInt(60, 40, 20, 255), Math.floor(x), Math.floor(y));
       }
     }
-    // Canopy circle
     const cr = 100;
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
@@ -191,9 +155,7 @@ async function generatePlaceholderImage(
       }
     }
   } else {
-    // Hard: simple face outline
     const cx = size / 2, cy = size / 2;
-    // Head oval
     for (let a = 0; a < Math.PI * 2; a += 0.002) {
       const x = Math.round(cx + 130 * Math.cos(a));
       const y = Math.round(cy + 170 * Math.sin(a));
@@ -201,7 +163,6 @@ async function generatePlaceholderImage(
         img.setPixelColor(Jimp.rgbaToInt(40, 40, 40, 255), x, y);
       }
     }
-    // Eyes
     for (const ex of [cx - 45, cx + 45]) {
       for (let a = 0; a < Math.PI * 2; a += 0.01) {
         const x = Math.round(ex + 18 * Math.cos(a));
@@ -211,7 +172,6 @@ async function generatePlaceholderImage(
         }
       }
     }
-    // Mouth
     for (let a = 0.2; a < Math.PI - 0.2; a += 0.01) {
       const x = Math.round(cx + 50 * Math.cos(a));
       const y = Math.round((cy + 60) + 20 * Math.sin(a));

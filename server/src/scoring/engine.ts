@@ -25,6 +25,8 @@ interface ScoringResult {
   heatmapUrl: string;
   comparisonUrl: string;
   overlayUrl: string;
+  referenceBase64: string;
+  sketchBase64: string;
 }
 
 // ── Helpers ──
@@ -130,8 +132,8 @@ function contourF1(refBin: boolean[][], sketchBin: boolean[][], tolerance = 3): 
 
 /**
  * Compute ink density penalty.
- * If the sketch has way more ink than the reference, penalize it.
- * This prevents "black the whole canvas" cheating.
+ * Penalizes sketches that have significantly more ink than the reference.
+ * Also penalizes extraneous drawing in regions where the reference has nothing.
  */
 function inkDensityPenalty(refGray: number[][], sketchGray: number[][]): number {
   const h = refGray.length;
@@ -152,16 +154,59 @@ function inkDensityPenalty(refGray: number[][], sketchGray: number[][]): number 
   const sketchRatio = sketchDark / total;
 
   // If sketch has only slightly more ink, no penalty
-  // If sketch is >3x the reference ink or >50% coverage, heavy penalty
-  if (sketchRatio <= refRatio * 1.5) return 1.0; // no penalty
-  if (sketchRatio > 0.7) return 0.1; // almost all-black, very harsh penalty
-  if (sketchRatio > 0.5) return 0.3;
+  if (sketchRatio <= refRatio * 1.2) return 1.0;
+
+  // Harsh penalties for excessive coverage
+  if (sketchRatio > 0.6) return 0.05;
+  if (sketchRatio > 0.4) return 0.15;
+  if (sketchRatio > 0.3) return 0.3;
 
   // Gradual penalty for excess ink
   const excessRatio = sketchRatio / Math.max(refRatio, 0.01);
-  if (excessRatio > 5) return 0.2;
-  if (excessRatio > 3) return 0.5;
-  return Math.max(0.5, 1 - (excessRatio - 1.5) * 0.3);
+  if (excessRatio > 5) return 0.15;
+  if (excessRatio > 3) return 0.35;
+  if (excessRatio > 2) return 0.55;
+  return Math.max(0.4, 1 - (excessRatio - 1.2) * 0.4);
+}
+
+/**
+ * Spatial extra-ink penalty: penalizes drawing in regions where reference has no content.
+ * Divides the canvas into patches; for each patch where sketch has ink but reference doesn't,
+ * applies a deduction.
+ */
+function spatialExtraPenalty(refGray: number[][], sketchGray: number[][], patchSize = 32): number {
+  const h = refGray.length;
+  const w = refGray[0].length;
+  let totalPatches = 0;
+  let extraPatches = 0;
+
+  for (let y = 0; y + patchSize <= h; y += patchSize) {
+    for (let x = 0; x + patchSize <= w; x += patchSize) {
+      totalPatches++;
+      let refInk = 0;
+      let sketchInk = 0;
+      const n = patchSize * patchSize;
+
+      for (let dy = 0; dy < patchSize; dy++) {
+        for (let dx = 0; dx < patchSize; dx++) {
+          if (refGray[y + dy][x + dx] < 200) refInk++;
+          if (sketchGray[y + dy][x + dx] < 200) sketchInk++;
+        }
+      }
+
+      // If reference patch is mostly empty but sketch patch has significant ink
+      const refInkRatio = refInk / n;
+      const sketchInkRatio = sketchInk / n;
+      if (refInkRatio < 0.02 && sketchInkRatio > 0.05) {
+        extraPatches++;
+      }
+    }
+  }
+
+  if (totalPatches === 0) return 1.0;
+  const extraRatio = extraPatches / totalPatches;
+  // Penalize: up to 30% deduction for lots of extra drawing in empty areas
+  return Math.max(0.7, 1 - extraRatio * 1.5);
 }
 
 // Simple corner detection (Harris-like response)
@@ -377,7 +422,10 @@ export async function computeScore(
   // 4. Ink density penalty
   const inkPenalty = inkDensityPenalty(refGray, sketchGray);
 
-  // 5. Composite with ink penalty applied
+  // 5. Spatial extra-ink penalty (penalizes drawing in empty areas)
+  const spatialPenalty = spatialExtraPenalty(refGray, sketchGray);
+
+  // 6. Composite with both penalties applied
   const weights = DIFFICULTY_WEIGHTS[difficulty];
   const rawComposite = (
     weights.contour * contourScore +
@@ -385,7 +433,7 @@ export async function computeScore(
     weights.local * localScore
   );
 
-  const composite = rawComposite * inkPenalty;
+  const composite = rawComposite * inkPenalty * spatialPenalty;
   const percentage = Math.round(Math.min(100, composite * 100) * 100) / 100;
 
   // Generate output images
@@ -401,6 +449,22 @@ export async function computeScore(
   await generateComparison(refAbsPath, sketchPath, comparisonPath);
   await generateOverlay(refAbsPath, sketchPath, overlayPath);
 
+  // Convert generated images to base64 data URIs for reliable delivery (no filesystem dependency)
+  const heatmapBase64 = `data:image/png;base64,${fs.readFileSync(heatmapPath).toString('base64')}`;
+  const comparisonBase64 = `data:image/png;base64,${fs.readFileSync(comparisonPath).toString('base64')}`;
+  const overlayBase64 = `data:image/png;base64,${fs.readFileSync(overlayPath).toString('base64')}`;
+
+  // Also provide separate reference and sketch as base64 for flicker mode
+  const refBuffer = await refImg.getBufferAsync(Jimp.MIME_PNG);
+  const sketchBuffer = await sketchImg.getBufferAsync(Jimp.MIME_PNG);
+  const referenceBase64 = `data:image/png;base64,${refBuffer.toString('base64')}`;
+  const sketchBase64 = `data:image/png;base64,${sketchBuffer.toString('base64')}`;
+
+  // Clean up temp files (best effort)
+  try { fs.unlinkSync(heatmapPath); } catch {}
+  try { fs.unlinkSync(comparisonPath); } catch {}
+  try { fs.unlinkSync(overlayPath); } catch {}
+
   return {
     score: percentage,
     breakdown: {
@@ -409,8 +473,10 @@ export async function computeScore(
       localSimilarity: Math.round(localScore * 10000) / 100,
       composite: percentage,
     },
-    heatmapUrl: `/uploads/results/heatmap-${id}.png`,
-    comparisonUrl: `/uploads/results/comparison-${id}.png`,
-    overlayUrl: `/uploads/results/overlay-${id}.png`,
+    heatmapUrl: heatmapBase64,
+    comparisonUrl: comparisonBase64,
+    overlayUrl: overlayBase64,
+    referenceBase64,
+    sketchBase64,
   };
 }

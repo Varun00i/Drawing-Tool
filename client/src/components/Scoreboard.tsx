@@ -135,9 +135,7 @@ function DetailView({ result, onBack }: DetailViewProps) {
   }, [comparisonMode]);
 
   // Parse comparison URL to extract reference and sketch URLs
-  // The server returns a side-by-side image at comparisonUrl
-  // and an overlay at overlayUrl (if available)
-  const overlayUrl = result.overlayUrl;
+  // The server now returns separate base64 images for flicker mode
 
   return (
     <div className="w-full max-w-2xl mx-auto animate-slide-up">
@@ -205,16 +203,10 @@ function DetailView({ result, onBack }: DetailViewProps) {
 
           {comparisonMode === 'overlay' && (
             <div className="relative">
-              {overlayUrl ? (
+              {result.overlayUrl ? (
                 <img
-                  src={overlayUrl}
+                  src={result.overlayUrl}
                   alt="Overlay comparison"
-                  className="w-full"
-                />
-              ) : result.comparisonUrl ? (
-                <img
-                  src={result.comparisonUrl}
-                  alt="Comparison"
                   className="w-full"
                 />
               ) : (
@@ -225,22 +217,26 @@ function DetailView({ result, onBack }: DetailViewProps) {
 
           {comparisonMode === 'flicker' && (
             <div className="relative">
-              {result.comparisonUrl && (
-                <div className="relative overflow-hidden">
+              {(result.referenceBase64 || result.sketchBase64) ? (
+                <div className="relative">
                   <img
-                    src={result.comparisonUrl}
-                    alt="Comparison"
+                    src={flickerState ? (result.sketchBase64 || '') : (result.referenceBase64 || '')}
+                    alt={flickerState ? 'Your Sketch' : 'Reference'}
                     className="w-full"
-                    style={{
-                      // Crop to show only left half (reference) or right half (sketch)
-                      objectFit: 'cover',
-                      objectPosition: flickerState ? 'right center' : 'left center',
-                    }}
                   />
                   <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full">
                     {flickerState ? 'Your Sketch' : 'Reference'}
                   </div>
                 </div>
+              ) : result.comparisonUrl ? (
+                <div className="relative">
+                  <img src={result.comparisonUrl} alt="Comparison" className="w-full" />
+                  <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full">
+                    Side by side (flicker unavailable)
+                  </div>
+                </div>
+              ) : (
+                <div className="p-8 text-center text-[#86868B]">No images available</div>
               )}
             </div>
           )}
