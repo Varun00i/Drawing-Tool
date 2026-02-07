@@ -81,11 +81,51 @@ export async function generateReferenceImage(
 
     console.log(`[ImageGen] Requesting from Pollinations.ai: "${prompt.slice(0, 60)}..."`);
 
-    const response = await fetch(pollinationsUrl, {
-      signal: AbortSignal.timeout(30000), // 30s timeout
-    });
+    // Retry loop for transient 5xx errors (e.g., 502 Bad Gateway)
+    const maxAttempts = 3;
+    let attempt = 0;
+    let response: Response | null = null;
+    while (attempt < maxAttempts) {
+      try {
+        response = await fetch(pollinationsUrl, {
+          signal: AbortSignal.timeout(30000), // 30s timeout per attempt
+        });
 
-    if (response.ok) {
+        if (response.ok) break; // success
+
+        // For server errors, retry with exponential backoff
+        console.warn(`[ImageGen] Pollinations returned status ${response.status} (attempt ${attempt + 1}/${maxAttempts})`);
+        if (response.status >= 500 && attempt < maxAttempts - 1) {
+          const delay = 500 * Math.pow(2, attempt); // 500ms, 1000ms, ...
+          await new Promise(res => setTimeout(res, delay));
+          attempt++;
+          continue;
+        }
+
+        // For non-retryable status (4xx), try to log body and abort
+        try {
+          const txt = await response.text();
+          console.warn(`[ImageGen] Pollinations body: ${txt.slice(0, 500)}`);
+        } catch (e) {
+          /* ignore */
+        }
+        break;
+      } catch (error: any) {
+        // Network or timeout - retry
+        console.warn(`[ImageGen] Pollinations.ai fetch error (attempt ${attempt + 1}/${maxAttempts}):`, error?.message || error);
+        if (attempt < maxAttempts - 1) {
+          const delay = 500 * Math.pow(2, attempt);
+          await new Promise(res => setTimeout(res, delay));
+          attempt++;
+          continue;
+        }
+        // Out of attempts
+        response = null;
+        break;
+      }
+    }
+
+    if (response && response.ok) {
       const buffer = Buffer.from(await response.arrayBuffer());
       // Verify we got an actual image (check for PNG/JPEG header)
       if (buffer.length > 1000 && (
@@ -98,8 +138,8 @@ export async function generateReferenceImage(
       } else {
         console.warn(`[ImageGen] Pollinations returned non-image data (${buffer.length} bytes)`);
       }
-    } else {
-      console.warn(`[ImageGen] Pollinations returned status ${response.status}`);
+    } else if (response && !response.ok) {
+      console.warn(`[ImageGen] Pollinations final status ${response.status}`);
     }
   } catch (error: any) {
     console.warn(`[ImageGen] Pollinations.ai failed:`, error.message || error);
