@@ -293,21 +293,35 @@ export function useCanvas(
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    // Helper: determine if a color is light (would be invisible on white bg)
+    const isLight = (hex: string): boolean => {
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      return luminance > 0.7;
+    };
+
     if (options.tool === 'eraser') {
       const size = Math.max(8, options.brushSize * 3);
-      const half = (size + 4) / 2;
-      const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size + 4}' height='${size + 4}'><circle cx='${half}' cy='${half}' r='${size / 2}' fill='white' stroke='%23999' stroke-width='1.5'/></svg>`;
+      const svgSize = size + 6;
+      const half = svgSize / 2;
+      const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${svgSize}' height='${svgSize}'><circle cx='${half}' cy='${half}' r='${size / 2}' fill='white' stroke='%23666' stroke-width='1.5'/><line x1='${half - 3}' y1='${half}' x2='${half + 3}' y2='${half}' stroke='%23999' stroke-width='1'/><line x1='${half}' y1='${half - 3}' x2='${half}' y2='${half + 3}' stroke='%23999' stroke-width='1'/></svg>`;
       canvas.style.cursor = `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${half} ${half}, auto`;
     } else if (options.tool === 'fill') {
       canvas.style.cursor = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23333' stroke-width='2'><path d='m19 11-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2c.8.8 2 .8 2.8 0L19 11Z'/><path d='m5 2 5 5'/><path d='M2 13h15'/><path d='M22 20a2 2 0 1 1-4 0c0-1.6 1.7-2.4 2-4 .3 1.6 2 2.4 2 4Z'/></svg>`)}") 2 22, auto`;
     } else if (options.tool === 'line' || options.tool === 'rectangle' || options.tool === 'circle') {
       canvas.style.cursor = 'crosshair';
     } else {
-      // Pencil cursor - circle matching brush size
+      // Pencil — always show a visible cursor with contrasting outline
       const size = Math.max(6, options.brushSize + 2);
-      const half = (size + 4) / 2;
+      const svgSize = size + 6;
+      const half = svgSize / 2;
+      const r = size / 2;
       const color = encodeURIComponent(options.brushColor);
-      const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size + 4}' height='${size + 4}'><circle cx='${half}' cy='${half}' r='${size / 2}' fill='${color}' opacity='0.7'/><circle cx='${half}' cy='${half}' r='${(size / 2) + 1}' fill='none' stroke='%23555' stroke-width='0.5'/></svg>`;
+      // Use a dark outer ring for light colors, light outer ring for dark colors
+      const outlineColor = isLight(options.brushColor) ? '%23333' : '%23DDD';
+      const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${svgSize}' height='${svgSize}'><circle cx='${half}' cy='${half}' r='${r + 1.5}' fill='none' stroke='${outlineColor}' stroke-width='1'/><circle cx='${half}' cy='${half}' r='${r}' fill='${color}' opacity='0.85'/></svg>`;
       canvas.style.cursor = `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${half} ${half}, crosshair`;
     }
   }, [canvasRef, options.tool, options.brushSize, options.brushColor]);

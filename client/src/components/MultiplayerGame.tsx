@@ -458,7 +458,7 @@ export function MultiplayerGame() {
                   className="max-w-full max-h-[60vh] object-contain rounded-lg"
                   style={{ width: CANVAS_SIZE, height: CANVAS_SIZE, maxHeight: '60vh' }} />
                 {gridVisible && room?.settings.gridOption !== 'none' && (
-                  <GridOverlay gridOption={room?.settings.gridOption || 'none'} width={CANVAS_SIZE} height={CANVAS_SIZE} />
+                  <GridOverlay gridOption={room?.settings.gridOption || 'none'} />
                 )}
               </div>
             </div>
@@ -476,7 +476,7 @@ export function MultiplayerGame() {
               style={{ maxHeight: '60vh', aspectRatio: '1' }}
             />
             {gridVisible && room?.settings.gridOption !== 'none' && (
-              <GridOverlay gridOption={room?.settings.gridOption || 'none'} width={CANVAS_SIZE} height={CANVAS_SIZE} />
+              <GridOverlay gridOption={room?.settings.gridOption || 'none'} />
             )}
           </div>
 

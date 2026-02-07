@@ -119,6 +119,7 @@ export function SoloGame() {
         breakdown: result.breakdown,
         heatmapUrl: result.heatmapUrl,
         comparisonUrl: result.comparisonUrl,
+        overlayUrl: result.overlayUrl,
       };
       setMyResult(matchResult);
       playSfx('complete');
@@ -324,7 +325,7 @@ export function SoloGame() {
                   style={{ width: CANVAS_SIZE, height: CANVAS_SIZE, maxHeight: '60vh' }}
                 />
                 {gridVisible && (
-                  <GridOverlay gridOption={soloGrid} width={CANVAS_SIZE} height={CANVAS_SIZE} />
+                  <GridOverlay gridOption={soloGrid} />
                 )}
               </div>
             </div>
@@ -344,7 +345,7 @@ export function SoloGame() {
 
             {/* Grid Overlay */}
             {gridVisible && countdown <= 0 && (
-              <GridOverlay gridOption={soloGrid} width={CANVAS_SIZE} height={CANVAS_SIZE} />
+              <GridOverlay gridOption={soloGrid} />
             )}
           </div>
 

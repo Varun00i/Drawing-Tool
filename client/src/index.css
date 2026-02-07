@@ -46,9 +46,79 @@ body {
   --color-text-secondary: #CCCCCC;
 }
 
+/* Override Tailwind hardcoded colors in high-contrast mode */
 .high-contrast body {
-  background-color: var(--color-bg);
-  color: var(--color-text);
+  background-color: #000000 !important;
+  color: #FFFFFF !important;
+}
+
+.high-contrast .card,
+.high-contrast .bg-white {
+  background-color: #1A1A1A !important;
+  border-color: #555 !important;
+}
+
+.high-contrast .bg-\[\#F2F2F7\],
+.high-contrast .bg-\[\#FAFAFA\] {
+  background-color: #2A2A2A !important;
+}
+
+.high-contrast .text-\[\#1D1D1F\] {
+  color: #FFFFFF !important;
+}
+
+.high-contrast .text-\[\#86868B\] {
+  color: #CCCCCC !important;
+}
+
+.high-contrast .border-\[\#E5E5EA\] {
+  border-color: #555 !important;
+}
+
+.high-contrast .bg-white\/80 {
+  background-color: rgba(26, 26, 26, 0.9) !important;
+}
+
+.high-contrast .drawing-canvas {
+  border-color: #666 !important;
+}
+
+.high-contrast .floating-ref {
+  background-color: #1A1A1A !important;
+  border-color: #555 !important;
+}
+
+.high-contrast .floating-ref-header {
+  background-color: #2A2A2A !important;
+  border-color: #555 !important;
+  color: #CCC !important;
+}
+
+.high-contrast .tool-btn {
+  color: #FFF !important;
+}
+
+.high-contrast .tool-btn:hover {
+  background-color: #333 !important;
+}
+
+.high-contrast .input-field {
+  background-color: #2A2A2A !important;
+  color: #FFFFFF !important;
+  border-color: #555 !important;
+}
+
+.high-contrast .btn-secondary {
+  background-color: #333 !important;
+  color: #FFF !important;
+}
+
+.high-contrast .hover\:bg-\[\#E5E5EA\]:hover {
+  background-color: #444 !important;
+}
+
+.high-contrast .hover\:bg-\[\#F2F2F7\]:hover {
+  background-color: #333 !important;
 }
 
 /* ── Reduce motion ── */
@@ -117,17 +187,29 @@ body {
   /* Cursor is set dynamically by useCanvas hook */
 }
 
-/* ── Grid overlay ── */
+/* ── Grid overlay (percentage-based, scales with container) ── */
 .grid-overlay {
   position: absolute;
   inset: 0;
   pointer-events: none;
   z-index: 10;
+  overflow: hidden;
 }
 
-.grid-overlay line {
-  stroke: rgba(0, 122, 255, 0.25);
-  stroke-width: 1;
+.grid-line-v {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(0, 122, 255, 0.35);
+}
+
+.grid-line-h {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(0, 122, 255, 0.35);
 }
 
 /* ── Scrollbar styling ── */

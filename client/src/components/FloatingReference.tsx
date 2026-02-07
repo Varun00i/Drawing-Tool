@@ -87,7 +87,7 @@ export function FloatingReference({ imageUrl, onClose, gridOption = 'none' }: Fl
           draggable={false}
         />
         {gridOption !== 'none' && (
-          <GridOverlay gridOption={gridOption} width={size.width} height={size.height} />
+          <GridOverlay gridOption={gridOption} />
         )}
       </div>
     </div>
