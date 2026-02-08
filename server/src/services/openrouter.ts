@@ -1,17 +1,14 @@
 /**
- * Image generation service using OpenRouter chat/completions API.
- * Uses sourceful/riverflow-v2-pro model with modalities: ["image"].
- * Returns base64 image data, cached locally for performance.
+ * Image generation service using Pollinations.ai (free, no API key).
+ * Generates sketch-style reference images for the drawing game.
+ * Falls back gracefully with retries.
  */
 
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import sharp from 'sharp';
 import { Difficulty, PROMPT_TEMPLATES } from '../types';
-
-const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_API_KEY = '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';
-const OPENROUTER_MODEL = 'sourceful/riverflow-v2-pro';
 
 const CACHE_DIR = path.join(__dirname, '..', '..', 'generated-images', 'cache');
 
@@ -50,112 +47,88 @@ function getCachedImage(cacheKey: string): string | null {
 
 async function saveToCache(cacheKey: string, imageData: Buffer): Promise<string> {
   fs.mkdirSync(CACHE_DIR, { recursive: true });
+  // Always convert to PNG for consistent format (Jimp compatibility)
+  const pngBuffer = await sharp(imageData).png().toBuffer();
   const filePath = path.join(CACHE_DIR, `${cacheKey}.png`);
-  fs.writeFileSync(filePath, imageData);
+  fs.writeFileSync(filePath, pngBuffer);
   return `/generated-images/cache/${cacheKey}.png`;
 }
 
 /**
- * Generate a reference image via OpenRouter chat/completions API.
- * Uses modalities: ["image"] to get base64 image back.
+ * Generate a reference image via Pollinations.ai (free, no API key needed).
+ * Uses the flux model for high-quality image generation.
  */
 export async function generateReferenceImage(
   difficulty: Difficulty,
   seed?: number,
   customPrompt?: string
 ): Promise<GeneratedImage> {
-  // Build prompt: user prompt or preset + sketch suffix
-  const basePrompt = customPrompt
-    ? customPrompt
-    : getPrompt(difficulty, seed);
+  // Build prompt
+  const basePrompt = customPrompt || getPrompt(difficulty, seed);
   const prompt = basePrompt + SKETCH_SUFFIX;
 
   const cacheKey = getCacheKey(prompt);
   const id = cacheKey;
 
-  // Check cache first
+  // Check cache
   const cachedUrl = getCachedImage(cacheKey);
   if (cachedUrl) {
     console.log(`[ImageGen] Cache hit for: "${basePrompt.slice(0, 60)}"`);
     return { id, url: cachedUrl, prompt: basePrompt, cached: true };
   }
 
-  // ── Call OpenRouter API ──
-  console.log(`[ImageGen] Calling OpenRouter (${OPENROUTER_MODEL}): "${basePrompt.slice(0, 80)}"`);
+  // ── Pollinations.ai (free, no key required) ──
+  const pollinationsSeed = Math.floor(Math.random() * 999999);
+  const encodedPrompt = encodeURIComponent(prompt);
+  const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=512&height=512&nologo=true&seed=${pollinationsSeed}&model=flux`;
 
-  try {
-    const response = await fetch(OPENROUTER_API_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://accuracy-sketch-ai.onrender.com',
-        'X-Title': 'Accuracy Sketch AI',
-      },
-      body: JSON.stringify({
-        model: OPENROUTER_MODEL,
-        messages: [
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-        modalities: ['image'],
-      }),
-      signal: AbortSignal.timeout(60000), // 60s timeout
-    });
+  console.log(`[ImageGen] Calling Pollinations.ai: "${basePrompt.slice(0, 80)}"`);
 
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'no body');
-      console.error(`[ImageGen] OpenRouter returned ${response.status}: ${errorText.slice(0, 500)}`);
-      throw new Error(`OpenRouter API returned ${response.status}`);
-    }
+  const maxRetries = 3;
+  let lastError: Error | null = null;
 
-    const data = await response.json() as any;
-    console.log(`[ImageGen] OpenRouter response received, parsing...`);
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(pollinationsUrl, {
+        signal: AbortSignal.timeout(60000), // 60s timeout
+        headers: {
+          'Accept': 'image/*',
+          'User-Agent': 'AccuracySketchAI/1.0',
+        },
+      });
 
-    // Extract base64 image from response
-    // Format: choices[0].message.images[0].image_url.url = "data:image/png;base64,..."
-    const images = data?.choices?.[0]?.message?.images;
-    if (images && images.length > 0) {
-      const dataUrl: string = images[0]?.image_url?.url || '';
-      if (dataUrl.startsWith('data:image/')) {
-        // Extract raw base64
-        const base64Data = dataUrl.split(',')[1];
-        if (base64Data) {
-          const imgBuffer = Buffer.from(base64Data, 'base64');
-          const localUrl = await saveToCache(cacheKey, imgBuffer);
-          console.log(`[ImageGen] Success! Saved ${imgBuffer.length} bytes to cache`);
-          return { id, url: localUrl, prompt: basePrompt, cached: false };
-        }
+      if (!response.ok) {
+        throw new Error(`Pollinations returned ${response.status}: ${response.statusText}`);
       }
-      // Might be a direct URL instead of data URI
-      const directUrl: string = images[0]?.image_url?.url || '';
-      if (directUrl.startsWith('http')) {
-        const imgResp = await fetch(directUrl);
-        const imgBuffer = Buffer.from(await imgResp.arrayBuffer());
-        const localUrl = await saveToCache(cacheKey, imgBuffer);
-        console.log(`[ImageGen] Success from direct URL! Saved ${imgBuffer.length} bytes`);
-        return { id, url: localUrl, prompt: basePrompt, cached: false };
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('image')) {
+        throw new Error(`Unexpected content-type: ${contentType}`);
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      const imgBuffer = Buffer.from(arrayBuffer);
+
+      if (imgBuffer.length < 1000) {
+        throw new Error(`Image too small (${imgBuffer.length} bytes), likely an error`);
+      }
+
+      // Save to cache (converts to PNG automatically via Sharp)
+      const localUrl = await saveToCache(cacheKey, imgBuffer);
+      console.log(`[ImageGen] Success! Saved ${imgBuffer.length} bytes to cache (attempt ${attempt})`);
+      return { id, url: localUrl, prompt: basePrompt, cached: false };
+
+    } catch (error: any) {
+      lastError = error;
+      console.warn(`[ImageGen] Attempt ${attempt}/${maxRetries} failed:`, error.message);
+
+      if (attempt < maxRetries) {
+        // Wait before retry (exponential backoff)
+        await new Promise(r => setTimeout(r, 2000 * attempt));
       }
     }
-
-    // Fallback: check if content itself contains base64
-    const content = data?.choices?.[0]?.message?.content || '';
-    if (content.startsWith('data:image/')) {
-      const base64Data = content.split(',')[1];
-      if (base64Data) {
-        const imgBuffer = Buffer.from(base64Data, 'base64');
-        const localUrl = await saveToCache(cacheKey, imgBuffer);
-        console.log(`[ImageGen] Success from content field!`);
-        return { id, url: localUrl, prompt: basePrompt, cached: false };
-      }
-    }
-
-    console.error(`[ImageGen] Unexpected response structure:`, JSON.stringify(data).slice(0, 500));
-    throw new Error('No image found in OpenRouter response');
-  } catch (error: any) {
-    console.error(`[ImageGen] OpenRouter failed:`, error.message || error);
-    throw new Error(`Image generation failed: ${error.message}`);
   }
+
+  console.error(`[ImageGen] All ${maxRetries} attempts failed`);
+  throw new Error(`Image generation failed after ${maxRetries} attempts: ${lastError?.message}`);
 }

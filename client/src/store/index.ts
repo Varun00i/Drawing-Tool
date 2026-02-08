@@ -121,7 +121,7 @@ export const useGameStore = create<GameStore>((set) => ({
 
   currentTool: 'pencil',
   setCurrentTool: (t) => set({ currentTool: t }),
-  brushSize: 3,
+  brushSize: 5,
   setBrushSize: (s) => set({ brushSize: s }),
   brushColor: '#1E1E1E',
   setBrushColor: (c) => set({ brushColor: c }),
@@ -143,7 +143,7 @@ export const useGameStore = create<GameStore>((set) => ({
       results: [],
       myResult: null,
       currentTool: 'pencil',
-      brushSize: 3,
+      brushSize: 5,
       brushColor: '#1E1E1E',
       opacity: 1,
       referenceVisible: true,

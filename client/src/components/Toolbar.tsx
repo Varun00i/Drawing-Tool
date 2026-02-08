@@ -80,7 +80,7 @@ export function Toolbar({ onUndo, onRedo, onClear, canUndo, canRedo }: ToolbarPr
     return () => document.removeEventListener('mousedown', handler);
   }, [showColorPicker]);
 
-  const brushSizes = [1, 3, 5, 8, 12];
+  const brushSizes = [2, 5, 8, 12, 18];
 
   return (
     <div className="toolbar-container">

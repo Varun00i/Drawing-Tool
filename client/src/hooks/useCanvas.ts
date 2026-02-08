@@ -16,13 +16,30 @@ interface CanvasState {
 interface Point {
   x: number;
   y: number;
-  pressure?: number;
-  time?: number;
+  time: number;
+}
+
+// ── Velocity-based dynamic width ──
+// Maps stroke velocity to a width multiplier for natural pen feel.
+// Slow strokes → full width, fast strokes → thinner (down to 40%).
+function velocityWidth(baseSize: number, prev: Point, curr: Point): number {
+  const dx = curr.x - prev.x;
+  const dy = curr.y - prev.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const dt = Math.max(1, curr.time - prev.time);
+  const velocity = dist / dt; // px/ms
+
+  // Map velocity to multiplier: 0 velocity → 1.15x, high velocity → 0.4x
+  const factor = Math.max(0.4, Math.min(1.15, 1.15 - velocity * 0.12));
+  return baseSize * factor;
 }
 
 /**
- * High-quality drawing hook with quadratic Bezier curve smoothing,
- * point interpolation for fast strokes, and anti-aliased rendering.
+ * Professional drawing hook with:
+ * - Continuous line rendering (no gaps even at high speed)
+ * - Velocity-based dynamic stroke width
+ * - Quadratic Bezier smoothing for curves
+ * - Proper anti-aliasing
  */
 export function useCanvas(
   canvasRef: React.RefObject<HTMLCanvasElement>,
@@ -36,8 +53,10 @@ export function useCanvas(
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
 
-  // Accumulated points for the current stroke (for smooth curve rendering)
-  const strokePoints = useRef<Point[]>([]);
+  // For smooth quadratic Bezier: track the last 3 points
+  const prevPrevPoint = useRef<Point | null>(null);
+  // Track last rendered width for smooth transitions
+  const lastWidth = useRef<number>(0);
 
   const getCtx = useCallback(() => {
     return canvasRef.current?.getContext('2d') ?? null;
@@ -103,14 +122,12 @@ export function useCanvas(
       return {
         x: (touch.clientX - rect.left) * scaleX,
         y: (touch.clientY - rect.top) * scaleY,
-        pressure: (touch as any).force || 0.5,
         time: Date.now(),
       };
     }
     return {
       x: (e.clientX - rect.left) * scaleX,
       y: (e.clientY - rect.top) * scaleY,
-      pressure: 0.5,
       time: Date.now(),
     };
   }, [canvasRef]);
@@ -123,70 +140,57 @@ export function useCanvas(
     return `rgba(${r}, ${g}, ${b}, ${options.opacity})`;
   }, [options.brushColor, options.opacity]);
 
-  // ── Incremental smooth draw: renders the latest segment using quadratic Bezier ──
-  const drawIncrementalSmooth = useCallback((points: Point[], isEraser: boolean) => {
+  /**
+   * Core drawing function: draws a smooth segment from prev→curr point.
+   * Uses quadratic Bezier curves when 3+ points are available.
+   * Applies velocity-based dynamic width for natural pen feel.
+   */
+  const drawSegment = useCallback((prev: Point, curr: Point, prevPrev: Point | null) => {
     const ctx = getCtx();
     if (!ctx) return;
 
-    const len = points.length;
-    if (len < 2) return;
+    const isEraser = options.tool === 'eraser';
+    const baseSize = isEraser ? options.brushSize * 3 : options.brushSize;
+
+    // Calculate dynamic width from velocity
+    const targetWidth = velocityWidth(baseSize, prev, curr);
+    // Smooth width transitions (lerp toward target)
+    const smoothedWidth = lastWidth.current === 0
+      ? targetWidth
+      : lastWidth.current * 0.6 + targetWidth * 0.4;
+    lastWidth.current = smoothedWidth;
 
     ctx.beginPath();
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    ctx.lineWidth = smoothedWidth;
 
     if (isEraser) {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.strokeStyle = 'rgba(255,255,255,1)';
-      ctx.lineWidth = options.brushSize * 3;
     } else {
       ctx.globalCompositeOperation = 'source-over';
       ctx.strokeStyle = getStrokeColor();
-      ctx.lineWidth = options.brushSize;
     }
 
-    if (len === 2) {
-      // Only two points so far, draw a simple line
-      ctx.moveTo(points[0].x, points[0].y);
-      ctx.lineTo(points[1].x, points[1].y);
+    if (prevPrev) {
+      // Quadratic Bezier: use the previous point as control point,
+      // draw from midpoint(prevPrev, prev) to midpoint(prev, curr)
+      const mid0x = (prevPrev.x + prev.x) / 2;
+      const mid0y = (prevPrev.y + prev.y) / 2;
+      const mid1x = (prev.x + curr.x) / 2;
+      const mid1y = (prev.y + curr.y) / 2;
+
+      ctx.moveTo(mid0x, mid0y);
+      ctx.quadraticCurveTo(prev.x, prev.y, mid1x, mid1y);
     } else {
-      // Draw the last smooth segment using quadratic Bezier through midpoints
-      const p0 = points[len - 3];
-      const p1 = points[len - 2];
-      const p2 = points[len - 1];
-
-      const mid0 = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
-      const mid1 = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
-
-      ctx.moveTo(mid0.x, mid0.y);
-      ctx.quadraticCurveTo(p1.x, p1.y, mid1.x, mid1.y);
+      // Only 2 points: simple line
+      ctx.moveTo(prev.x, prev.y);
+      ctx.lineTo(curr.x, curr.y);
     }
 
     ctx.stroke();
-  }, [getCtx, options.brushSize, getStrokeColor]);
-
-  // Interpolate points when mouse moves too fast (fill gaps for smoother strokes)
-  const interpolatePoints = useCallback((from: Point, to: Point): Point[] => {
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const minSpacing = Math.max(2, options.brushSize * 0.5);
-
-    if (dist <= minSpacing) return [to];
-
-    const steps = Math.ceil(dist / minSpacing);
-    const points: Point[] = [];
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps;
-      points.push({
-        x: from.x + dx * t,
-        y: from.y + dy * t,
-        pressure: (from.pressure ?? 0.5) + ((to.pressure ?? 0.5) - (from.pressure ?? 0.5)) * t,
-        time: (from.time ?? 0) + ((to.time ?? 0) - (from.time ?? 0)) * t,
-      });
-    }
-    return points;
-  }, [options.brushSize]);
+  }, [getCtx, options.tool, options.brushSize, getStrokeColor]);
 
   const floodFill = useCallback((startX: number, startY: number) => {
     const ctx = getCtx();
@@ -301,23 +305,23 @@ export function useCanvas(
     isDrawing.current = true;
     lastPoint.current = point;
     startPoint.current = point;
-    strokePoints.current = [point];
+    prevPrevPoint.current = null;
+    lastWidth.current = 0;
 
     if (options.tool === 'line' || options.tool === 'rectangle' || options.tool === 'circle') {
       preShapeSnapshot.current = ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height);
     } else {
-      // Draw a dot at the start point for single taps
+      // Draw a dot at the start point for single click/tap
+      const isEraser = options.tool === 'eraser';
       ctx.beginPath();
-      if (options.tool === 'eraser') {
+      if (isEraser) {
         ctx.globalCompositeOperation = 'destination-out';
         ctx.fillStyle = 'rgba(255,255,255,1)';
-        const r = (options.brushSize * 3) / 2;
-        ctx.arc(point.x, point.y, r, 0, Math.PI * 2);
+        ctx.arc(point.x, point.y, (options.brushSize * 3) / 2, 0, Math.PI * 2);
       } else {
         ctx.globalCompositeOperation = 'source-over';
         ctx.fillStyle = getStrokeColor();
-        const r = options.brushSize / 2;
-        ctx.arc(point.x, point.y, r, 0, Math.PI * 2);
+        ctx.arc(point.x, point.y, options.brushSize / 2, 0, Math.PI * 2);
       }
       ctx.fill();
     }
@@ -328,25 +332,29 @@ export function useCanvas(
     if (!isDrawing.current) return;
 
     const point = getPoint(e);
-    if (!point) return;
+    if (!point || !lastPoint.current) return;
 
     if (options.tool === 'line' || options.tool === 'rectangle' || options.tool === 'circle') {
       if (startPoint.current) {
         drawShapePreview(startPoint.current, point);
       }
-    } else {
-      // Freehand drawing: add interpolated points for smoothness
-      if (lastPoint.current) {
-        const interpolated = interpolatePoints(lastPoint.current, point);
-        for (const p of interpolated) {
-          strokePoints.current.push(p);
-        }
-        // Draw the latest segment incrementally
-        drawIncrementalSmooth(strokePoints.current, options.tool === 'eraser');
-      }
-      lastPoint.current = point;
+      return;
     }
-  }, [getPoint, drawShapePreview, drawIncrementalSmooth, interpolatePoints, options.tool]);
+
+    // ── Freehand drawing ──
+    // Skip if the mouse hasn't moved enough (prevents jitter)
+    const dx = point.x - lastPoint.current.x;
+    const dy = point.y - lastPoint.current.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 1.5) return;
+
+    // Draw smooth segment with velocity-based width
+    drawSegment(lastPoint.current, point, prevPrevPoint.current);
+
+    // Shift point history
+    prevPrevPoint.current = lastPoint.current;
+    lastPoint.current = point;
+  }, [getPoint, drawShapePreview, drawSegment, options.tool]);
 
   const stopDrawing = useCallback((e: MouseEvent | TouchEvent) => {
     e.preventDefault();
@@ -357,27 +365,32 @@ export function useCanvas(
       if (point) {
         drawShapePreview(startPoint.current, point);
       }
+    } else if (lastPoint.current && prevPrevPoint.current) {
+      // Draw final segment to the endpoint to close cleanly
+      const point = getPoint(e);
+      if (point) {
+        drawSegment(lastPoint.current, point, prevPrevPoint.current);
+      }
     }
 
     isDrawing.current = false;
     lastPoint.current = null;
     startPoint.current = null;
+    prevPrevPoint.current = null;
     preShapeSnapshot.current = null;
-    strokePoints.current = [];
-  }, [getPoint, drawShapePreview, options.tool]);
+    lastWidth.current = 0;
+  }, [getPoint, drawShapePreview, drawSegment, options.tool]);
 
   // Dynamic cursor
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Helper: determine if a color is light (would be invisible on white bg)
     const isLight = (hex: string): boolean => {
       const r = parseInt(hex.slice(1, 3), 16);
       const g = parseInt(hex.slice(3, 5), 16);
       const b = parseInt(hex.slice(5, 7), 16);
-      const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-      return luminance > 0.7;
+      return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.7;
     };
 
     if (options.tool === 'eraser') {
@@ -391,7 +404,6 @@ export function useCanvas(
     } else if (options.tool === 'line' || options.tool === 'rectangle' || options.tool === 'circle') {
       canvas.style.cursor = 'crosshair';
     } else {
-      // Pencil — always show a visible cursor with contrasting outline
       const size = Math.max(6, options.brushSize + 2);
       const svgSize = size + 6;
       const half = svgSize / 2;

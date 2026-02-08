@@ -13,11 +13,21 @@
  */
 
 import Jimp from 'jimp';
+import sharp from 'sharp';
 import path from 'path';
 import fs from 'fs';
 import { Difficulty, DIFFICULTY_WEIGHTS, ScoreBreakdown } from '../types';
 
 const TARGET_SIZE = 512;
+
+/**
+ * Convert any image file to PNG buffer using Sharp.
+ * This handles webp, avif, and other formats that Jimp cannot read.
+ */
+async function toPngBuffer(filePath: string): Promise<Buffer> {
+  const buf = fs.readFileSync(filePath);
+  return sharp(buf).png().toBuffer();
+}
 
 interface ScoringResult {
   score: number;
@@ -351,8 +361,8 @@ async function generateComparison(
   sketchPath: string,
   outputPath: string
 ): Promise<void> {
-  const ref = (await Jimp.read(refPath)).resize(TARGET_SIZE, TARGET_SIZE);
-  const sketch = (await Jimp.read(sketchPath)).resize(TARGET_SIZE, TARGET_SIZE);
+  const ref = (await Jimp.read(await toPngBuffer(refPath))).resize(TARGET_SIZE, TARGET_SIZE);
+  const sketch = (await Jimp.read(await toPngBuffer(sketchPath))).resize(TARGET_SIZE, TARGET_SIZE);
 
   const combined = new Jimp(TARGET_SIZE * 2 + 20, TARGET_SIZE);
   combined.composite(ref, 0, 0);
@@ -366,8 +376,8 @@ async function generateOverlay(
   sketchPath: string,
   outputPath: string
 ): Promise<void> {
-  const ref = (await Jimp.read(refPath)).resize(TARGET_SIZE, TARGET_SIZE);
-  const sketch = (await Jimp.read(sketchPath)).resize(TARGET_SIZE, TARGET_SIZE).opacity(0.5);
+  const ref = (await Jimp.read(await toPngBuffer(refPath))).resize(TARGET_SIZE, TARGET_SIZE);
+  const sketch = (await Jimp.read(await toPngBuffer(sketchPath))).resize(TARGET_SIZE, TARGET_SIZE).opacity(0.5);
 
   const combined = ref.clone();
   combined.composite(sketch, 0, 0);
@@ -392,9 +402,11 @@ export async function computeScore(
     refAbsPath = sketchPath;
   }
 
-  // Load and normalize images
-  const refImg = (await Jimp.read(refAbsPath)).resize(TARGET_SIZE, TARGET_SIZE);
-  const sketchImg = (await Jimp.read(sketchPath)).resize(TARGET_SIZE, TARGET_SIZE);
+  // Load and normalize images (convert to PNG first to handle webp/avif)
+  const refPng = await toPngBuffer(refAbsPath);
+  const sketchPng = await toPngBuffer(sketchPath);
+  const refImg = (await Jimp.read(refPng)).resize(TARGET_SIZE, TARGET_SIZE);
+  const sketchImg = (await Jimp.read(sketchPng)).resize(TARGET_SIZE, TARGET_SIZE);
 
   // Convert to grayscale
   const refGray = toGrayscaleBuffer(refImg);
