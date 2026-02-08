@@ -1,5 +1,6 @@
 import { useGameStore } from '../store';
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import type { DrawingTool } from '../types';
 import {
   Pencil, Eraser, Undo2, Redo2, Trash2,
@@ -44,6 +45,25 @@ export function Toolbar({ onUndo, onRedo, onClear, canUndo, canRedo }: ToolbarPr
   const colorInputRef = useRef<HTMLInputElement>(null);
   const colorPickerRef = useRef<HTMLDivElement>(null);
   const colorBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Compute picker position relative to the button
+  const [pickerPos, setPickerPos] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (!showColorPicker || !colorBtnRef.current) return;
+    const rect = colorBtnRef.current.getBoundingClientRect();
+    const isMobile = window.innerWidth < 640;
+    if (isMobile) {
+      // Center on screen
+      setPickerPos(null); // null = use centered fixed style
+    } else {
+      // Position above the button
+      setPickerPos({
+        top: rect.top - 8, // 8px margin above
+        left: rect.left,
+      });
+    }
+  }, [showColorPicker]);
 
   // Close color picker when clicking outside
   useEffect(() => {
@@ -95,43 +115,51 @@ export function Toolbar({ onUndo, onRedo, onClear, canUndo, canRedo }: ToolbarPr
             <span className="toolbar-label">Color</span>
           </button>
 
-          {showColorPicker && (
-            <div
-              ref={colorPickerRef}
-              className="fixed sm:absolute z-[100] p-3 bg-white rounded-xl border border-[#E5E5EA] shadow-2xl"
-              style={{
-                // On mobile: center on screen; on desktop: position near button
-                ...(window.innerWidth < 640
-                  ? { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }
-                  : { bottom: '100%', left: '0', marginBottom: '8px' }
-                ),
-              }}
-            >
-              <div className="grid grid-cols-5 gap-2 mb-3">
-                {PRESET_COLORS.map((color) => (
-                  <button
-                    key={color}
-                    onClick={() => { setBrushColor(color); setShowColorPicker(false); }}
-                    className={`w-8 h-8 rounded-full border-2 transition-transform hover:scale-110 ${
-                      brushColor === color ? 'border-[#007AFF] scale-110 ring-2 ring-[#007AFF]/30' : 'border-[#E5E5EA]'
-                    }`}
-                    style={{ backgroundColor: color }}
-                    aria-label={`Color ${color}`}
-                  />
-                ))}
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-[#86868B]">Custom:</label>
-                <input
-                  ref={colorInputRef}
-                  type="color"
-                  value={brushColor}
-                  onChange={(e) => setBrushColor(e.target.value)}
-                  className="w-8 h-8 rounded border-0 cursor-pointer"
+          {showColorPicker && createPortal(
+            <>
+              {/* Backdrop on mobile */}
+              {window.innerWidth < 640 && (
+                <div
+                  className="fixed inset-0 bg-black/30 z-[9998]"
+                  onClick={() => setShowColorPicker(false)}
                 />
-                <span className="text-xs text-[#86868B] font-mono">{brushColor}</span>
+              )}
+              <div
+                ref={colorPickerRef}
+                className="fixed z-[9999] p-3 bg-white rounded-xl border border-[#E5E5EA] shadow-2xl"
+                style={
+                  pickerPos
+                    ? { top: pickerPos.top, left: pickerPos.left, transform: 'translateY(-100%)' }
+                    : { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }
+                }
+              >
+                <div className="grid grid-cols-5 gap-2 mb-3">
+                  {PRESET_COLORS.map((color) => (
+                    <button
+                      key={color}
+                      onClick={() => { setBrushColor(color); setShowColorPicker(false); }}
+                      className={`w-8 h-8 rounded-full border-2 transition-transform hover:scale-110 ${
+                        brushColor === color ? 'border-[#007AFF] scale-110 ring-2 ring-[#007AFF]/30' : 'border-[#E5E5EA]'
+                      }`}
+                      style={{ backgroundColor: color }}
+                      aria-label={`Color ${color}`}
+                    />
+                  ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-[#86868B]">Custom:</label>
+                  <input
+                    ref={colorInputRef}
+                    type="color"
+                    value={brushColor}
+                    onChange={(e) => setBrushColor(e.target.value)}
+                    className="w-8 h-8 rounded border-0 cursor-pointer"
+                  />
+                  <span className="text-xs text-[#86868B] font-mono">{brushColor}</span>
+                </div>
               </div>
-            </div>
+            </>,
+            document.body
           )}
         </div>
       </div>

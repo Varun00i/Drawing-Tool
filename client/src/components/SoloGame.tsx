@@ -399,7 +399,7 @@ export function SoloGame() {
           </div>
 
           {/* Toolbar */}
-          <div className="mt-4 overflow-x-auto max-w-full">
+          <div className="mt-4 max-w-full">
             <Toolbar
               onUndo={undo}
               onRedo={redo}

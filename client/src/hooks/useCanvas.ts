@@ -13,17 +13,31 @@ interface CanvasState {
   redoStack: ImageData[];
 }
 
+interface Point {
+  x: number;
+  y: number;
+  pressure?: number;
+  time?: number;
+}
+
+/**
+ * High-quality drawing hook with quadratic Bezier curve smoothing,
+ * point interpolation for fast strokes, and anti-aliased rendering.
+ */
 export function useCanvas(
   canvasRef: React.RefObject<HTMLCanvasElement>,
   options: CanvasOptions
 ) {
   const isDrawing = useRef(false);
-  const lastPoint = useRef<{ x: number; y: number } | null>(null);
-  const startPoint = useRef<{ x: number; y: number } | null>(null);
+  const lastPoint = useRef<Point | null>(null);
+  const startPoint = useRef<Point | null>(null);
   const preShapeSnapshot = useRef<ImageData | null>(null);
   const stateRef = useRef<CanvasState>({ undoStack: [], redoStack: [] });
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+
+  // Accumulated points for the current stroke (for smooth curve rendering)
+  const strokePoints = useRef<Point[]>([]);
 
   const getCtx = useCallback(() => {
     return canvasRef.current?.getContext('2d') ?? null;
@@ -78,7 +92,7 @@ export function useCanvas(
     ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
   }, [getCtx, canvasRef, saveState]);
 
-  const getPoint = useCallback((e: MouseEvent | TouchEvent): { x: number; y: number } | null => {
+  const getPoint = useCallback((e: MouseEvent | TouchEvent): Point | null => {
     if (!canvasRef.current) return null;
     const rect = canvasRef.current.getBoundingClientRect();
     const scaleX = canvasRef.current.width / rect.width;
@@ -89,11 +103,15 @@ export function useCanvas(
       return {
         x: (touch.clientX - rect.left) * scaleX,
         y: (touch.clientY - rect.top) * scaleY,
+        pressure: (touch as any).force || 0.5,
+        time: Date.now(),
       };
     }
     return {
       x: (e.clientX - rect.left) * scaleX,
       y: (e.clientY - rect.top) * scaleY,
+      pressure: 0.5,
+      time: Date.now(),
     };
   }, [canvasRef]);
 
@@ -105,18 +123,19 @@ export function useCanvas(
     return `rgba(${r}, ${g}, ${b}, ${options.opacity})`;
   }, [options.brushColor, options.opacity]);
 
-  const drawLine = useCallback((
-    from: { x: number; y: number },
-    to: { x: number; y: number }
-  ) => {
+  // ── Incremental smooth draw: renders the latest segment using quadratic Bezier ──
+  const drawIncrementalSmooth = useCallback((points: Point[], isEraser: boolean) => {
     const ctx = getCtx();
     if (!ctx) return;
 
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
+    const len = points.length;
+    if (len < 2) return;
 
-    if (options.tool === 'eraser') {
+    ctx.beginPath();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    if (isEraser) {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.strokeStyle = 'rgba(255,255,255,1)';
       ctx.lineWidth = options.brushSize * 3;
@@ -126,10 +145,48 @@ export function useCanvas(
       ctx.lineWidth = options.brushSize;
     }
 
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    if (len === 2) {
+      // Only two points so far, draw a simple line
+      ctx.moveTo(points[0].x, points[0].y);
+      ctx.lineTo(points[1].x, points[1].y);
+    } else {
+      // Draw the last smooth segment using quadratic Bezier through midpoints
+      const p0 = points[len - 3];
+      const p1 = points[len - 2];
+      const p2 = points[len - 1];
+
+      const mid0 = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+      const mid1 = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+
+      ctx.moveTo(mid0.x, mid0.y);
+      ctx.quadraticCurveTo(p1.x, p1.y, mid1.x, mid1.y);
+    }
+
     ctx.stroke();
-  }, [getCtx, options.tool, options.brushSize, getStrokeColor]);
+  }, [getCtx, options.brushSize, getStrokeColor]);
+
+  // Interpolate points when mouse moves too fast (fill gaps for smoother strokes)
+  const interpolatePoints = useCallback((from: Point, to: Point): Point[] => {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const minSpacing = Math.max(2, options.brushSize * 0.5);
+
+    if (dist <= minSpacing) return [to];
+
+    const steps = Math.ceil(dist / minSpacing);
+    const points: Point[] = [];
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      points.push({
+        x: from.x + dx * t,
+        y: from.y + dy * t,
+        pressure: (from.pressure ?? 0.5) + ((to.pressure ?? 0.5) - (from.pressure ?? 0.5)) * t,
+        time: (from.time ?? 0) + ((to.time ?? 0) - (from.time ?? 0)) * t,
+      });
+    }
+    return points;
+  }, [options.brushSize]);
 
   const floodFill = useCallback((startX: number, startY: number) => {
     const ctx = getCtx();
@@ -195,7 +252,7 @@ export function useCanvas(
     ctx.putImageData(imageData, 0, 0);
   }, [getCtx, canvasRef, options.brushColor, options.opacity]);
 
-  const drawShapePreview = useCallback((from: { x: number; y: number }, to: { x: number; y: number }) => {
+  const drawShapePreview = useCallback((from: Point, to: Point) => {
     const ctx = getCtx();
     if (!ctx || !canvasRef.current || !preShapeSnapshot.current) return;
 
@@ -244,13 +301,27 @@ export function useCanvas(
     isDrawing.current = true;
     lastPoint.current = point;
     startPoint.current = point;
+    strokePoints.current = [point];
 
     if (options.tool === 'line' || options.tool === 'rectangle' || options.tool === 'circle') {
       preShapeSnapshot.current = ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height);
     } else {
-      drawLine(point, point);
+      // Draw a dot at the start point for single taps
+      ctx.beginPath();
+      if (options.tool === 'eraser') {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.fillStyle = 'rgba(255,255,255,1)';
+        const r = (options.brushSize * 3) / 2;
+        ctx.arc(point.x, point.y, r, 0, Math.PI * 2);
+      } else {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = getStrokeColor();
+        const r = options.brushSize / 2;
+        ctx.arc(point.x, point.y, r, 0, Math.PI * 2);
+      }
+      ctx.fill();
     }
-  }, [getPoint, saveState, drawLine, floodFill, getCtx, canvasRef, options.tool]);
+  }, [getPoint, saveState, floodFill, getCtx, canvasRef, options.tool, options.brushSize, getStrokeColor]);
 
   const draw = useCallback((e: MouseEvent | TouchEvent) => {
     e.preventDefault();
@@ -264,12 +335,18 @@ export function useCanvas(
         drawShapePreview(startPoint.current, point);
       }
     } else {
+      // Freehand drawing: add interpolated points for smoothness
       if (lastPoint.current) {
-        drawLine(lastPoint.current, point);
+        const interpolated = interpolatePoints(lastPoint.current, point);
+        for (const p of interpolated) {
+          strokePoints.current.push(p);
+        }
+        // Draw the latest segment incrementally
+        drawIncrementalSmooth(strokePoints.current, options.tool === 'eraser');
       }
       lastPoint.current = point;
     }
-  }, [getPoint, drawLine, drawShapePreview, options.tool]);
+  }, [getPoint, drawShapePreview, drawIncrementalSmooth, interpolatePoints, options.tool]);
 
   const stopDrawing = useCallback((e: MouseEvent | TouchEvent) => {
     e.preventDefault();
@@ -286,6 +363,7 @@ export function useCanvas(
     lastPoint.current = null;
     startPoint.current = null;
     preShapeSnapshot.current = null;
+    strokePoints.current = [];
   }, [getPoint, drawShapePreview, options.tool]);
 
   // Dynamic cursor
@@ -319,7 +397,6 @@ export function useCanvas(
       const half = svgSize / 2;
       const r = size / 2;
       const color = encodeURIComponent(options.brushColor);
-      // Use a dark outer ring for light colors, light outer ring for dark colors
       const outlineColor = isLight(options.brushColor) ? '%23333' : '%23DDD';
       const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${svgSize}' height='${svgSize}'><circle cx='${half}' cy='${half}' r='${r + 1.5}' fill='none' stroke='${outlineColor}' stroke-width='1'/><circle cx='${half}' cy='${half}' r='${r}' fill='${color}' opacity='0.85'/></svg>`;
       canvas.style.cursor = `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${half} ${half}, crosshair`;
